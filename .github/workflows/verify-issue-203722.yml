@@ -1,0 +1,70 @@
+name: Verify issue 203722 on main (leaderless COMDAT crash)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build clang@main and run reproducer
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout llvm-project main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: llvm/llvm-project
+          ref: main
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ninja-build cmake
+
+      - name: Configure (clang + X86 only)
+        run: |
+          cmake -B build -S llvm -G Ninja \
+            -DLLVM_ENABLE_PROJECTS=clang \
+            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DCLANG_BUILD_TOOLS=ON
+
+      - name: Build clang
+        run: ninja -C build clang
+
+      - name: Write minimal reproducer
+        run: |
+          cat > missing.ll << 'EOF'
+          target triple = "x86_64-pc-windows-msvc"
+
+          $missing_leader = comdat any
+          @assoc = global i32 0, comdat($missing_leader)
+          EOF
+
+      - name: Run reproducer (expect crash on unfixed builds)
+        id: repro
+        run: |
+          set +e
+          ./build/bin/clang --target=x86_64-pc-windows-msvc -c missing.ll 2>&1
+          EXIT=$?
+          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Report result
+        run: |
+          EXIT=${{ steps.repro.outputs.exit_code }}
+          if [ "$EXIT" -eq 70 ]; then
+            echo "BUG CONFIRMED on main: clang exited 70 (report_fatal_error)."
+            echo "The leaderless-COMDAT crash is present in the current main branch."
+            exit 1
+          elif [ "$EXIT" -eq 0 ]; then
+            echo "BUG NOT REPRODUCED: clang exited 0. The crash may have been fixed."
+          else
+            echo "Unexpected exit code $EXIT — inspect the log above."
+            exit 1
+          fi
