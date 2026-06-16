@@ -36,6 +36,7 @@ jobs:
           key: ccache-clang-x86-${{ github.run_id }}
           restore-keys: |
             ccache-clang-x86-
+          save-always: true
 
       - name: Configure (clang + X86 only)
         run: |
