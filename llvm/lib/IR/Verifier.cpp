@@ -1945,12 +1945,9 @@ void Verifier::visitComdat(const Comdat &C) {
     // The comdat name must resolve to an existing GlobalValue (the leader).
     // A leaderless comdat causes a report_fatal_error in the COFF backend.
     const GlobalValue *GV = M.getNamedValue(C.getName());
-    Check(GV != nullptr,
-          "comdat symbol '" + C.getName() + "' has no definition in module",
-          &C);
+    Check(GV, "comdat symbol '" + C.getName() + "' has no definition in module", &C);
     if (GV)
-      Check(!GV->hasPrivateLinkage(), "comdat global value has private linkage",
-            GV);
+      Check(!GV->hasPrivateLinkage(), "comdat global value has private linkage", GV);
   }
 }
 
