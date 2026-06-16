@@ -1941,10 +1941,17 @@ void Verifier::visitDIImportedEntity(const DIImportedEntity &N) {
 void Verifier::visitComdat(const Comdat &C) {
   // In COFF the Module is invalid if the GlobalValue has private linkage.
   // Entities with private linkage don't have entries in the symbol table.
-  if (TT.isOSBinFormatCOFF())
-    if (const GlobalValue *GV = M.getNamedValue(C.getName()))
+  if (TT.isOSBinFormatCOFF()) {
+    // The comdat name must resolve to an existing GlobalValue (the leader).
+    // A leaderless comdat causes a report_fatal_error in the COFF backend.
+    const GlobalValue *GV = M.getNamedValue(C.getName());
+    Check(GV != nullptr,
+          "comdat symbol '" + C.getName() + "' has no definition in module",
+          &C);
+    if (GV)
       Check(!GV->hasPrivateLinkage(), "comdat global value has private linkage",
             GV);
+  }
 }
 
 void Verifier::visitModuleIdents() {

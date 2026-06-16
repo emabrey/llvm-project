@@ -21,7 +21,21 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y ninja-build cmake
+          sudo apt-get install -y ninja-build cmake ccache
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size=2G
+          ccache --set-config=compression=true
+          ccache --zero-stats
+
+      - name: Restore ccache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v5.0.5
+        with:
+          path: ~/.ccache
+          key: ccache-clang-x86-${{ github.run_id }}
+          restore-keys: |
+            ccache-clang-x86-
 
       - name: Configure (clang + X86 only)
         run: |
@@ -32,10 +46,16 @@ jobs:
             -DLLVM_ENABLE_ASSERTIONS=ON \
             -DLLVM_INCLUDE_TESTS=OFF \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
-            -DCLANG_BUILD_TOOLS=ON
+            -DCLANG_BUILD_TOOLS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build clang
         run: ninja -C build clang
+
+      - name: Print ccache stats
+        if: always()
+        run: ccache --show-stats
 
       - name: Write minimal reproducer
         run: |
@@ -46,25 +66,57 @@ jobs:
           @assoc = global i32 0, comdat($missing_leader)
           EOF
 
-      - name: Run reproducer (expect crash on unfixed builds)
+      - name: Run opt -verify to check verifier catches leaderless comdat
+        id: verifier
+        run: |
+          set +e
+          ./build/bin/opt -passes=verify missing.ll -o /dev/null 2>&1
+          echo "verifier_exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Run clang to check backend crash
         id: repro
         run: |
           set +e
           ./build/bin/clang --target=x86_64-pc-windows-msvc -c missing.ll 2>&1
-          EXIT=$?
-          echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           set -e
+
+      - name: Collect clang crash reproducer files
+        if: always()
+        run: |
+          mkdir -p crash-reproducers
+          find /tmp -maxdepth 1 \( -name 'missing-*.ll' -o -name 'missing-*.sh' \) \
+            2>/dev/null | xargs -I{} cp {} crash-reproducers/ || true
+
+      - name: Upload crash reproducer files
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: clang-crash-reproducers
+          path: crash-reproducers/
+          if-no-files-found: warn
 
       - name: Report result
         run: |
+          VER=${{ steps.verifier.outputs.verifier_exit }}
           EXIT=${{ steps.repro.outputs.exit_code }}
-          if [ "$EXIT" -eq 70 ]; then
-            echo "BUG CONFIRMED on main: clang exited 70 (report_fatal_error)."
-            echo "The leaderless-COMDAT crash is present in the current main branch."
-            exit 1
-          elif [ "$EXIT" -eq 0 ]; then
-            echo "BUG NOT REPRODUCED: clang exited 0. The crash may have been fixed."
+
+          echo "--- verifier exit: $VER ---"
+          if [ "$VER" -ne 0 ]; then
+            echo "VERIFIER catches the leaderless comdat (fix is working)."
           else
-            echo "Unexpected exit code $EXIT — inspect the log above."
-            exit 1
+            echo "VERIFIER did NOT catch the leaderless comdat."
           fi
+
+          echo "--- clang backend exit: $EXIT ---"
+          # The clang driver wraps cc1; cc1 exits 70 on report_fatal_error but
+          # the driver surfaces that as exit 1. Treat any non-zero as the crash.
+          if [ "$EXIT" -ne 0 ]; then
+            echo "BACKEND CRASH present: clang exited $EXIT."
+          else
+            echo "BACKEND did not crash."
+          fi
+
+          # Fail the job if the backend still crashes (verifier not catching it)
+          [ "$EXIT" -eq 0 ] || exit 1
