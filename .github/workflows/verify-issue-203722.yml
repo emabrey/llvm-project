@@ -50,8 +50,8 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-      - name: Build clang
-        run: ninja -C build clang
+      - name: Build clang and opt
+        run: ninja -C build clang opt
 
       - name: Print ccache stats
         if: always()
@@ -103,7 +103,10 @@ jobs:
           EXIT=${{ steps.repro.outputs.exit_code }}
 
           echo "--- verifier exit: $VER ---"
-          if [ "$VER" -ne 0 ]; then
+          if [ "$VER" -eq 127 ]; then
+            echo "ERROR: opt not found (build issue)."
+            exit 1
+          elif [ "$VER" -ne 0 ]; then
             echo "VERIFIER catches the leaderless comdat (fix is working)."
           else
             echo "VERIFIER did NOT catch the leaderless comdat."
