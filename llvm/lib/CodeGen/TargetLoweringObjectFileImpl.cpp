@@ -1768,13 +1768,11 @@ MCSection *TargetLoweringObjectFileCOFF::getExplicitSectionGlobal(
   StringRef COMDATSymName = "";
   if (GO->hasComdat()) {
     Selection = getSelectionForCOFF(GO);
-    const GlobalValue *ComdatGV;
+    const GlobalValue *ComdatGV = GO;
     if (Selection == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
       ComdatGV = getComdatGVForCOFF(GO);
       if (!ComdatGV)
         return getContext().getCOFFSection(Name, Characteristics);
-    } else {
-      ComdatGV = GO;
     }
 
     if (!ComdatGV->hasPrivateLinkage()) {
@@ -1821,13 +1819,11 @@ MCSection *TargetLoweringObjectFileCOFF::SelectSectionForGlobal(
     int Selection = getSelectionForCOFF(GO);
     if (!Selection)
       Selection = COFF::IMAGE_COMDAT_SELECT_NODUPLICATES;
-    const GlobalValue *ComdatGV;
+    const GlobalValue *ComdatGV = GO;
     if (GO->hasComdat()) {
       ComdatGV = getComdatGVForCOFF(GO);
       if (!ComdatGV)
         return getContext().getCOFFSection(Name, Characteristics);
-    } else {
-      ComdatGV = GO;
     }
 
     unsigned UniqueID = MCSection::NonUniqueID;
