@@ -1712,9 +1712,11 @@ static const GlobalValue *getComdatGVForCOFF(const GlobalValue *GV) {
 
   StringRef ComdatGVName = C->getName();
   const GlobalValue *ComdatGV = GV->getParent()->getNamedValue(ComdatGVName);
-  if (!ComdatGV)
-    report_fatal_error("Associative COMDAT symbol '" + ComdatGVName +
-                       "' does not exist.");
+  if (!ComdatGV) {
+    GV->getContext().diagnose(LoweringDiagnosticInfo(
+        "Associative COMDAT symbol '" + ComdatGVName + "' does not exist"));
+    return nullptr;
+  }
 
   if (ComdatGV->getComdat() != C)
     report_fatal_error("Associative COMDAT symbol '" + ComdatGVName +
@@ -1767,10 +1769,13 @@ MCSection *TargetLoweringObjectFileCOFF::getExplicitSectionGlobal(
   if (GO->hasComdat()) {
     Selection = getSelectionForCOFF(GO);
     const GlobalValue *ComdatGV;
-    if (Selection == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE)
+    if (Selection == COFF::IMAGE_COMDAT_SELECT_ASSOCIATIVE) {
       ComdatGV = getComdatGVForCOFF(GO);
-    else
+      if (!ComdatGV)
+        return getContext().getCOFFSection(Name, Characteristics);
+    } else {
       ComdatGV = GO;
+    }
 
     if (!ComdatGV->hasPrivateLinkage()) {
       MCSymbol *Sym = TM.getSymbol(ComdatGV);
@@ -1817,10 +1822,13 @@ MCSection *TargetLoweringObjectFileCOFF::SelectSectionForGlobal(
     if (!Selection)
       Selection = COFF::IMAGE_COMDAT_SELECT_NODUPLICATES;
     const GlobalValue *ComdatGV;
-    if (GO->hasComdat())
+    if (GO->hasComdat()) {
       ComdatGV = getComdatGVForCOFF(GO);
-    else
+      if (!ComdatGV)
+        return getContext().getCOFFSection(Name, Characteristics);
+    } else {
       ComdatGV = GO;
+    }
 
     unsigned UniqueID = MCSection::NonUniqueID;
     if (EmitUniquedSection)
